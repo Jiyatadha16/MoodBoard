@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ambient Moodboard</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <main id="main-content" class="card">
+        <button id="vibeBtn" class="primary-btn" aria-label="Generate new vibe">VIBE</button>
+        <div class="controls" role="toolbar" aria-label="Moodboard controls">
+            <button id="soundToggle" aria-label="Toggle sound on/off" aria-pressed="false">Sound Off</button>
+            <label for="volumeSlider">Volume</label>
+            <input type="range" id="volumeSlider" min="0" max="1" step="0.1" value="0.5" aria-label="Volume control">
+            <label for="chimeToggle">Chime</label>
+            <input type="checkbox" id="chimeToggle" aria-label="Enable chime on vibe" checked>
+            <label for="autoVibe">Auto-Vibe</label>
+            <input type="checkbox" id="autoVibe" aria-label="Enable auto-vibe cycling">
+            <label for="autoVibeInterval">Interval (seconds)</label>
+            <input type="number" id="autoVibeInterval" min="1" value="10" aria-label="Auto-vibe interval in seconds">
+            <label for="focusMode">Focus Mode</label>
+            <input type="checkbox" id="focusMode" aria-label="Enable focus mode to hide UI chrome">
+            <label for="particlesToggle">Particles</label>
+            <input type="checkbox" id="particlesToggle" aria-label="Enable ambient particles" checked>
+            <label for="themeSelect">Theme</label>
+            <select id="themeSelect" aria-label="Select theme">
+                <option value="default">Default</option>
+                <option value="cozy-winter">Cozy Winter</option>
+                <option value="golden-hour">Golden Hour</option>
+                <option value="rainy-loft">Rainy Loft</option>
+                <option value="starlit-night">Starlit Night</option>
+            </select>
+            <label for="autoThemeToggle">Auto-Cycle</label>
+            <input type="checkbox" id="autoThemeToggle" aria-label="Enable auto theme cycling">
+            <button id="viewSavedBtn" aria-label="View saved moods gallery">View Saved</button>
+        </div>
+        <div id="moodboard" aria-label="Current moodboard item">
+            <img id="moodImage" src="" alt="Ambient mood image for current vibe" style="display:none;">
+            <blockquote id="moodQuote" cite="" aria-live="polite"></blockquote>
+            <div class="moodboard-controls">
+                <button id="saveMoodBtn" aria-label="Save current mood to bookmarks">Save Mood</button>
+                <button id="audioControl" aria-label="Play or pause audio" disabled>Play</button>
+                <button id="nextSongBtn" aria-label="Play next ambient song" disabled>Next Song</button>
+            </div>
+        </div>
+        <div id="savedGallery" class="saved-gallery" style="display:none;" aria-label="Saved moods gallery">
+            <h3>Saved Moods</h3>
+            <div id="savedMoodsList" class="saved-moods-list"></div>
+            <button id="closeGalleryBtn" aria-label="Close saved moods gallery">Close</button>
+        </div>
+    </main>
+    <div id="themeCaption" class="theme-caption" style="display:none;"></div>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div id="audioOverlay" class="audio-overlay">Click to enable sound</div>
+    <script src="app.js"></script>
+</body>
+</html>
