@@ -1,0 +1,17 @@
+.app {
+  min-height: 100vh;
+  background: #1a1a1a;
+  color: #ffffff;
+}
+
+.app-header {
+  padding: 2rem;
+  text-align: center;
+}
+
+.moodboard {
+  padding: 2rem;
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
