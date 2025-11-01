@@ -10,6 +10,41 @@ A minimal ambient moodboard website built with plain HTML, CSS, and JavaScript. 
 - Dynamic quote loading from JSON
 - Dependency-free static site
 
+### Personalization Features
+
+- **Custom Quotes Upload**: Add, import, and export personal quotes with text and author fields
+- **Theme Builder**: Create custom themes with color pickers, font selection, and effect controls
+- **Auto-Adaptive Theme**: Automatically generate themes based on dominant colors from displayed images
+- **Daily Mood Journal**: Keep a daily journal with date navigation and export functionality
+
+### Visual Enhancement Features
+
+- **Dynamic Ambient Lighting**: Background gradient shifts slowly based on mood or cycles by default
+- **Soft Motion Trails**: Subtle particle trails spawn on hover over interactive elements
+- **Glass Distortion Effect**: Glassmorphism cards with subtle ripple distortion on proximity
+- **Custom Cursor**: Glowing orb cursor with smooth lerping and optional particle tail
+- **Subtle Camera Parallax**: Gentle background and card movement/tilt following mouse position
+
+All personalization data is stored locally in browser localStorage for privacy.
+
+#### Visual Enhancement Controls
+
+Each visual feature can be toggled independently via checkboxes in the controls panel:
+
+- **Ambient Lighting**: Enable/disable dynamic background color cycling
+- **Motion Trails**: Toggle particle trails on hover interactions
+- **Glass Distortion**: Enable/disable glassmorphism distortion effects
+- **Custom Cursor**: Replace native cursor with glowing orb (desktop only)
+- **Camera Parallax**: Enable subtle parallax movement effects
+
+#### Performance & Accessibility
+
+- All features respect `prefers-reduced-motion` media query
+- CPU usage is optimized with requestAnimationFrame and particle limits
+- Touch devices automatically disable cursor and parallax features
+- Keyboard navigation remains fully functional with all features enabled
+- No external dependencies - pure vanilla JavaScript and CSS
+
 ## Setup
 
 No dependencies required. All files are static and can be deployed directly.

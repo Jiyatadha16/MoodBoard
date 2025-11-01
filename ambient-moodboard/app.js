@@ -27,6 +27,29 @@ let currentTheme = 'default';
 let autoThemeInterval = null;
 let themeParticles = [];
 
+// New visual enhancement variables
+let ambientLightingEnabled = true;
+let motionTrailsEnabled = true;
+let glassDistortionEnabled = true;
+let customCursorEnabled = true;
+let parallaxEnabled = true;
+let motionTrailsCanvas = null;
+let motionTrailsCtx = null;
+let motionTrailParticles = [];
+let cursorOrb = null;
+let cursorTailParticles = [];
+let isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+let parallaxAnimationId = null;
+let cursorAnimationId = null;
+let trailsAnimationId = null;
+
+// New feature variables
+let userQuotes = [];
+let customThemes = [];
+let adaptiveThemeMode = 'off'; // 'off', 'manual', 'auto'
+let moodJournal = {};
+let currentJournalDate = new Date().toISOString().split('T')[0];
+
 // Settings persistence
 const SETTINGS_KEY = 'ambientMoodboardSettings';
 
@@ -44,6 +67,20 @@ function loadSettings() {
         document.getElementById('autoThemeToggle').checked = settings.autoTheme || false;
         savedMoods = settings.savedMoods || [];
         currentTheme = settings.currentTheme || 'default';
+
+        // Load new features
+        userQuotes = settings.userQuotes || [];
+        customThemes = settings.customThemes || [];
+        adaptiveThemeMode = settings.adaptiveThemeMode || 'off';
+        moodJournal = settings.moodJournal || {};
+
+        // Load visual enhancement toggles
+        ambientLightingEnabled = settings.ambientLightingEnabled !== false;
+        motionTrailsEnabled = settings.motionTrailsEnabled !== false;
+        glassDistortionEnabled = settings.glassDistortionEnabled !== false;
+        customCursorEnabled = settings.customCursorEnabled !== false;
+        parallaxEnabled = settings.parallaxEnabled !== false;
+
         return settings;
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -61,12 +98,24 @@ function saveSettings() {
         focusMode: document.getElementById('focusMode').checked,
         autoTheme: document.getElementById('autoThemeToggle').checked,
         savedMoods,
-        currentTheme
+        currentTheme,
+        // New features
+        userQuotes,
+        customThemes,
+        adaptiveThemeMode,
+        moodJournal,
+        // Visual enhancement toggles
+        ambientLightingEnabled,
+        motionTrailsEnabled,
+        glassDistortionEnabled,
+        customCursorEnabled,
+        parallaxEnabled
     };
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch (error) {
         console.error('Error saving settings:', error);
+        showToast('Failed to save settings', 'error');
     }
 }
 
@@ -624,11 +673,824 @@ function animateParticles() {
     }
 }
 
+// Toast notifications
+function showToast(message, type = 'success', duration = 3000) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `${message}<button class="close-btn" onclick="this.parentElement.remove()">&times;</button>`;
+
+    container.appendChild(toast);
+
+    // Auto-remove after duration
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, duration);
+}
+
+// Custom Quotes functionality
+function showCustomQuotesModal() {
+    renderUserQuotes();
+    document.getElementById('customQuotesModal').style.display = 'flex';
+    document.getElementById('quoteText').focus();
+}
+
+function closeCustomQuotesModal() {
+    document.getElementById('customQuotesModal').style.display = 'none';
+}
+
+function addUserQuote() {
+    const text = document.getElementById('quoteText').value.trim();
+    const author = document.getElementById('quoteAuthor').value.trim();
+
+    if (!text) {
+        showToast('Quote text is required', 'error');
+        return;
+    }
+
+    if (text.length > 300) {
+        showToast('Quote text must be 300 characters or less', 'error');
+        return;
+    }
+
+    const quote = {
+        text,
+        author: author || 'Unknown',
+        id: Date.now()
+    };
+
+    userQuotes.push(quote);
+    quotes.push(quote); // Add to active quotes pool
+    saveSettings();
+
+    // Clear form
+    document.getElementById('quoteText').value = '';
+    document.getElementById('quoteAuthor').value = '';
+
+    renderUserQuotes();
+    showToast('Quote added successfully');
+}
+
+function renderUserQuotes() {
+    const list = document.getElementById('quotesList');
+    list.innerHTML = '';
+
+    userQuotes.forEach(quote => {
+        const item = document.createElement('div');
+        item.className = 'quote-item';
+        item.innerHTML = `
+            <blockquote>
+                <p>"${quote.text}"</p>
+                <cite>— ${quote.author}</cite>
+            </blockquote>
+            <button onclick="removeUserQuote(${quote.id})" aria-label="Remove quote">Remove</button>
+        `;
+        list.appendChild(item);
+    });
+}
+
+function removeUserQuote(id) {
+    userQuotes = userQuotes.filter(q => q.id !== id);
+    quotes = quotes.filter(q => q.id !== id); // Remove from active pool
+    saveSettings();
+    renderUserQuotes();
+    showToast('Quote removed');
+}
+
+function importQuotes() {
+    const fileInput = document.getElementById('quotesFileInput');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        showToast('Please select a file', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            let importedQuotes = [];
+
+            if (file.name.endsWith('.json')) {
+                importedQuotes = JSON.parse(e.target.result);
+            } else if (file.name.endsWith('.txt')) {
+                // Parse text file (one quote per line, format: "text" — author)
+                const lines = e.target.result.split('\n').filter(line => line.trim());
+                importedQuotes = lines.map(line => {
+                    const match = line.match(/"([^"]+)"\s*—\s*(.+)/);
+                    if (match) {
+                        return { text: match[1], author: match[2] };
+                    }
+                    return { text: line, author: 'Unknown' };
+                });
+            } else {
+                throw new Error('Unsupported file format');
+            }
+
+            // Validate and deduplicate
+            const validQuotes = importedQuotes
+                .filter(q => q.text && q.text.trim())
+                .map(q => ({
+                    text: q.text.trim(),
+                    author: (q.author || 'Unknown').trim(),
+                    id: Date.now() + Math.random()
+                }));
+
+            // Remove duplicates
+            const existingTexts = new Set(userQuotes.map(q => q.text.toLowerCase()));
+            const uniqueQuotes = validQuotes.filter(q => !existingTexts.has(q.text.toLowerCase()));
+
+            userQuotes.push(...uniqueQuotes);
+            quotes.push(...uniqueQuotes);
+            saveSettings();
+
+            renderUserQuotes();
+            showToast(`Imported ${uniqueQuotes.length} quotes`);
+        } catch (error) {
+            showToast('Failed to import quotes: ' + error.message, 'error');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function exportQuotes() {
+    const dataStr = JSON.stringify(userQuotes, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'user-quotes.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast('Quotes exported');
+}
+
+// Theme Builder functionality
+function showThemeBuilderModal() {
+    updateThemePreview();
+    renderCustomThemes();
+    document.getElementById('themeBuilderModal').style.display = 'flex';
+}
+
+function closeThemeBuilderModal() {
+    document.getElementById('themeBuilderModal').style.display = 'none';
+}
+
+function updateThemePreview() {
+    const bgColor1 = document.getElementById('bgColor1').value;
+    const bgColor2 = document.getElementById('bgColor2').value;
+    const accentColor = document.getElementById('accentColor').value;
+    const blurValue = document.getElementById('blurSlider').value;
+    const contrastValue = document.getElementById('contrastSlider').value;
+    const fontFamily = document.getElementById('fontSelect').value;
+
+    const previewCard = document.querySelector('.preview-card');
+    const previewQuote = document.querySelector('.preview-quote');
+
+    previewCard.style.background = `linear-gradient(135deg, ${bgColor1}, ${bgColor2})`;
+    previewCard.style.backdropFilter = `blur(${blurValue}px)`;
+    previewCard.style.filter = `contrast(${contrastValue})`;
+    previewCard.style.fontFamily = fontFamily;
+    previewQuote.style.borderLeftColor = accentColor;
+}
+
+function saveCustomTheme() {
+    const name = prompt('Enter theme name:');
+    if (!name || !name.trim()) {
+        showToast('Theme name is required', 'error');
+        return;
+    }
+
+    const theme = {
+        name: name.trim(),
+        bgColor1: document.getElementById('bgColor1').value,
+        bgColor2: document.getElementById('bgColor2').value,
+        accentColor: document.getElementById('accentColor').value,
+        blur: document.getElementById('blurSlider').value,
+        contrast: document.getElementById('contrastSlider').value,
+        fontFamily: document.getElementById('fontSelect').value,
+        id: Date.now()
+    };
+
+    customThemes.push(theme);
+    saveSettings();
+    renderCustomThemes();
+    showToast('Theme saved');
+}
+
+function renderCustomThemes() {
+    const list = document.getElementById('customThemesList');
+    list.innerHTML = '';
+
+    customThemes.forEach(theme => {
+        const item = document.createElement('div');
+        item.className = 'custom-theme-item';
+        item.innerHTML = `
+            <span class="theme-name">${theme.name}</span>
+            <button class="apply-btn" onclick="applyCustomTheme(${theme.id})" aria-label="Apply theme ${theme.name}">Apply</button>
+            <button class="delete-btn" onclick="deleteCustomTheme(${theme.id})" aria-label="Delete theme ${theme.name}">Delete</button>
+        `;
+        list.appendChild(item);
+    });
+}
+
+function applyCustomTheme(id) {
+    const theme = customThemes.find(t => t.id === id);
+    if (!theme) return;
+
+    // Apply CSS variables
+    document.documentElement.style.setProperty('--custom-bg-grad-a', theme.bgColor1);
+    document.documentElement.style.setProperty('--custom-bg-grad-b', theme.bgColor2);
+    document.documentElement.style.setProperty('--custom-accent', theme.accentColor);
+    document.documentElement.style.setProperty('--custom-card-blur', theme.blur + 'px');
+    document.documentElement.style.setProperty('--custom-ui-font', theme.fontFamily);
+
+    // Remove other theme classes and add custom
+    document.body.classList.remove('theme-cozy-winter', 'theme-golden-hour', 'theme-rainy-loft', 'theme-starlit-night');
+    document.body.classList.add('theme-custom');
+
+    currentTheme = 'custom';
+    saveSettings();
+    showToast(`Applied theme: ${theme.name}`);
+}
+
+function deleteCustomTheme(id) {
+    customThemes = customThemes.filter(t => t.id !== id);
+    saveSettings();
+    renderCustomThemes();
+    showToast('Theme deleted');
+}
+
+function applyCustomThemePreview() {
+    const bgColor1 = document.getElementById('bgColor1').value;
+    const bgColor2 = document.getElementById('bgColor2').value;
+    const accentColor = document.getElementById('accentColor').value;
+    const blurValue = document.getElementById('blurSlider').value;
+    const contrastValue = document.getElementById('contrastSlider').value;
+    const fontFamily = document.getElementById('fontSelect').value;
+
+    // Apply to main interface temporarily
+    document.documentElement.style.setProperty('--custom-bg-grad-a', bgColor1);
+    document.documentElement.style.setProperty('--custom-bg-grad-b', bgColor2);
+    document.documentElement.style.setProperty('--custom-accent', accentColor);
+    document.documentElement.style.setProperty('--custom-card-blur', blurValue + 'px');
+    document.documentElement.style.setProperty('--custom-ui-font', fontFamily);
+
+    document.body.classList.remove('theme-cozy-winter', 'theme-golden-hour', 'theme-rainy-loft', 'theme-starlit-night');
+    document.body.classList.add('theme-custom');
+
+    currentTheme = 'custom';
+    showToast('Preview theme applied');
+}
+
+// Auto-Adaptive Theme functionality
+function toggleAdaptiveTheme() {
+    const modes = ['off', 'manual', 'auto'];
+    const currentIndex = modes.indexOf(adaptiveThemeMode);
+    adaptiveThemeMode = modes[(currentIndex + 1) % modes.length];
+
+    const btn = document.getElementById('adaptiveThemeToggle');
+    btn.textContent = `Adaptive ${adaptiveThemeMode.charAt(0).toUpperCase() + adaptiveThemeMode.slice(1)}`;
+    btn.setAttribute('aria-pressed', adaptiveThemeMode !== 'off');
+
+    saveSettings();
+    showToast(`Adaptive theme: ${adaptiveThemeMode}`);
+}
+
+async function extractDominantColor(imageSrc) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Downscale for performance
+            const scale = Math.min(40 / img.width, 40 / img.height);
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            // Quantize colors and find dominant
+            const colorBuckets = {};
+            for (let i = 0; i < data.length; i += 4) {
+                const r = Math.floor(data[i] / 16) * 16;
+                const g = Math.floor(data[i + 1] / 16) * 16;
+                const b = Math.floor(data[i + 2] / 16) * 16;
+                const key = `${r},${g},${b}`;
+
+                colorBuckets[key] = (colorBuckets[key] || 0) + 1;
+            }
+
+            let dominantColor = [128, 128, 128]; // Default gray
+            let maxCount = 0;
+
+            for (const [key, count] of Object.entries(colorBuckets)) {
+                if (count > maxCount) {
+                    dominantColor = key.split(',').map(Number);
+                    maxCount = count;
+                }
+            }
+
+            resolve(dominantColor);
+        };
+        img.src = imageSrc;
+    });
+}
+
+async function applyAdaptiveTheme(imageSrc) {
+    if (adaptiveThemeMode === 'off') return;
+
+    try {
+        const [r, g, b] = await extractDominantColor(imageSrc);
+
+        // Convert to HSL for adjustments
+        const hsl = rgbToHsl(r, g, b);
+
+        // Create complementary colors
+        const accentHsl = [...hsl];
+        accentHsl[0] = (accentHsl[0] + 180) % 360; // Complementary hue
+        accentHsl[1] = Math.min(100, accentHsl[1] + 20); // Increase saturation
+        accentHsl[2] = Math.min(70, accentHsl[2] + 20); // Lighten
+
+        const gradientHsl = [...hsl];
+        gradientHsl[2] = Math.max(20, gradientHsl[2] - 30); // Darken for gradient
+
+        const accentRgb = hslToRgb(...accentHsl);
+        const gradientRgb = hslToRgb(...gradientHsl);
+
+        // Apply theme
+        document.documentElement.style.setProperty('--custom-bg-grad-a', `rgb(${r}, ${g}, ${b})`);
+        document.documentElement.style.setProperty('--custom-bg-grad-b', `rgb(${gradientRgb[0]}, ${gradientRgb[1]}, ${gradientRgb[2]})`);
+        document.documentElement.style.setProperty('--custom-accent', `rgb(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]})`);
+
+        document.body.classList.remove('theme-cozy-winter', 'theme-golden-hour', 'theme-rainy-loft', 'theme-starlit-night');
+        document.body.classList.add('theme-custom');
+
+        currentTheme = 'custom';
+
+        if (adaptiveThemeMode === 'manual') {
+            showToast('Adaptive theme applied');
+        }
+    } catch (error) {
+        console.error('Failed to extract dominant color:', error);
+    }
+}
+
+// HSL/RGB conversion utilities
+function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+
+    if (max === min) {
+        h = s = 0;
+    } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+
+    return [h * 360, s * 100, l * 100];
+}
+
+function hslToRgb(h, s, l) {
+    h /= 360; s /= 100; l /= 100;
+    const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1/6) return p + (q - p) * 6 * t;
+        if (t < 1/2) return q;
+        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        return p;
+    };
+
+    let r, g, b;
+    if (s === 0) {
+        r = g = b = l;
+    } else {
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+    }
+
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+// Daily Mood Journal functionality
+function updateJournalDate() {
+    const dateInput = document.getElementById('journalDate');
+    const indicator = document.getElementById('journalIndicator');
+
+    currentJournalDate = dateInput.value;
+    const hasEntry = moodJournal[currentJournalDate];
+
+    indicator.classList.toggle('has-entry', !!hasEntry);
+    loadJournalEntry();
+}
+
+function loadJournalEntry() {
+    const entry = moodJournal[currentJournalDate] || '';
+    document.getElementById('journalEntry').value = entry;
+}
+
+function saveJournalEntry() {
+    const entry = document.getElementById('journalEntry').value.trim();
+
+    if (entry) {
+        moodJournal[currentJournalDate] = entry;
+    } else {
+        delete moodJournal[currentJournalDate];
+    }
+
+    saveSettings();
+    updateJournalDate();
+    showToast('Journal entry saved');
+}
+
+function navigateJournal(direction) {
+    const date = new Date(currentJournalDate);
+    date.setDate(date.getDate() + direction);
+    document.getElementById('journalDate').value = date.toISOString().split('T')[0];
+    updateJournalDate();
+}
+
+function exportJournal() {
+    const dataStr = JSON.stringify(moodJournal, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mood-journal-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast('Journal exported');
+}
+
+// Visual Enhancement Features
+
+// 1. Dynamic Ambient Lighting
+function setAmbientColors({a, b, c}) {
+    if (!ambientLightingEnabled) return;
+    document.documentElement.style.setProperty('--bg-a', a);
+    document.documentElement.style.setProperty('--bg-b', b);
+    document.documentElement.style.setProperty('--bg-c', c);
+}
+
+function updateAmbientLighting() {
+    if (!ambientLightingEnabled) return;
+
+    // Default slow cycling if no audio
+    const time = Date.now() * 0.0005;
+    const hue1 = (time * 60) % 360;
+    const hue2 = (time * 60 + 120) % 360;
+    const hue3 = (time * 60 + 240) % 360;
+
+    const a = `hsl(${hue1}, 70%, 60%)`;
+    const b = `hsl(${hue2}, 70%, 50%)`;
+    const c = `hsl(${hue3}, 70%, 55%)`;
+
+    setAmbientColors({a, b, c});
+}
+
+// 2. Soft Motion Trails
+class MotionTrailParticle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = (Math.random() - 0.5) * 2 - 0.5; // Slight upward drift
+        this.life = Math.random() * 1.4 + 0.8; // 0.8-2.2s
+        this.maxLife = this.life;
+        this.size = Math.random() * 2 + 1; // 1-3px
+        this.alpha = 1;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= 0.016; // ~60fps
+        this.alpha = this.life / this.maxLife;
+        this.vy += 0.01; // gravity
+    }
+
+    draw() {
+        if (!motionTrailsCtx) return;
+        motionTrailsCtx.globalAlpha = this.alpha;
+        motionTrailsCtx.fillStyle = `rgba(255,255,255,${this.alpha * 0.6})`;
+        motionTrailsCtx.beginPath();
+        motionTrailsCtx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        motionTrailsCtx.fill();
+    }
+
+    isDead() {
+        return this.life <= 0;
+    }
+}
+
+function initMotionTrailsCanvas() {
+    if (motionTrailsCanvas) return;
+
+    motionTrailsCanvas = document.createElement('canvas');
+    motionTrailsCanvas.className = 'motion-trails-canvas';
+    motionTrailsCanvas.width = window.innerWidth;
+    motionTrailsCanvas.height = window.innerHeight;
+    motionTrailsCtx = motionTrailsCanvas.getContext('2d');
+    document.body.appendChild(motionTrailsCanvas);
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        if (motionTrailsCanvas) {
+            motionTrailsCanvas.width = window.innerWidth;
+            motionTrailsCanvas.height = window.innerHeight;
+        }
+    });
+}
+
+function animateMotionTrails() {
+    if (!motionTrailsEnabled || !motionTrailsCtx) return;
+
+    motionTrailsCtx.clearRect(0, 0, motionTrailsCanvas.width, motionTrailsCanvas.height);
+
+    motionTrailParticles = motionTrailParticles.filter(particle => {
+        particle.update();
+        particle.draw();
+        return !particle.isDead();
+    });
+
+    if (motionTrailParticles.length > 0) {
+        trailsAnimationId = requestAnimationFrame(animateMotionTrails);
+    } else {
+        trailsAnimationId = null;
+    }
+}
+
+function spawnMotionTrail(x, y) {
+    if (!motionTrailsEnabled || motionTrailParticles.length >= 80) return;
+
+    for (let i = 0; i < 3; i++) { // Spawn 3 particles per event
+        motionTrailParticles.push(new MotionTrailParticle(x, y));
+    }
+
+    if (!trailsAnimationId) {
+        animateMotionTrails();
+    }
+}
+
+// 3. Glass Distortion Effect
+function updateGlassDistortion(intensity = 0) {
+    if (!glassDistortionEnabled) return;
+    document.documentElement.style.setProperty('--distortion-intensity', intensity);
+}
+
+function handleGlassDistortionHover(event) {
+    if (!glassDistortionEnabled) return;
+
+    const rect = event.target.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const distance = Math.sqrt(
+        Math.pow(event.clientX - centerX, 2) +
+        Math.pow(event.clientY - centerY, 2)
+    );
+    const maxDistance = Math.sqrt(rect.width * rect.width + rect.height * rect.height) / 2;
+    const intensity = Math.max(0, 1 - distance / maxDistance) * 5;
+
+    updateGlassDistortion(intensity);
+}
+
+// 4. Custom Cursor
+function initCustomCursor() {
+    if (cursorOrb) return;
+
+    cursorOrb = document.createElement('div');
+    cursorOrb.className = 'cursor-orb';
+    document.body.appendChild(cursorOrb);
+}
+
+function updateCursorPosition(x, y) {
+    if (!customCursorEnabled || !cursorOrb) return;
+
+    // Smooth lerping
+    const currentX = parseFloat(cursorOrb.style.left || '0');
+    const currentY = parseFloat(cursorOrb.style.top || '0');
+    const newX = currentX + (x - currentX) * 0.15;
+    const newY = currentY + (y - currentY) * 0.15;
+
+    cursorOrb.style.left = newX + 'px';
+    cursorOrb.style.top = newY + 'px';
+}
+
+function animateCursor() {
+    if (!customCursorEnabled) return;
+
+    cursorAnimationId = requestAnimationFrame(animateCursor);
+}
+
+function handleCursorHover(event) {
+    if (!customCursorEnabled || !cursorOrb) return;
+
+    if (event.type === 'mouseenter') {
+        cursorOrb.classList.add('hover');
+    } else {
+        cursorOrb.classList.remove('hover');
+    }
+}
+
+// 5. Subtle Camera Parallax
+function updateParallax(mouseX, mouseY) {
+    if (!parallaxEnabled) return;
+
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
+    const deltaX = (mouseX - centerX) / centerX; // -1 to 1
+    const deltaY = (mouseY - centerY) / centerY; // -1 to 1
+
+    // Background parallax (0.5-6px depending on viewport)
+    const bgOffsetX = deltaX * Math.min(6, window.innerWidth * 0.01);
+    const bgOffsetY = deltaY * Math.min(6, window.innerHeight * 0.01);
+
+    // Card tilt (max ±2 degrees)
+    const rotateX = deltaY * -2;
+    const rotateY = deltaX * 2;
+
+    document.documentElement.style.setProperty('--parallax-x', bgOffsetX + 'px');
+    document.documentElement.style.setProperty('--parallax-y', bgOffsetY + 'px');
+    document.documentElement.style.setProperty('--parallax-rotate-x', rotateX + 'deg');
+    document.documentElement.style.setProperty('--parallax-rotate-y', rotateY + 'deg');
+}
+
+function animateParallax() {
+    if (!parallaxEnabled) return;
+
+    parallaxAnimationId = requestAnimationFrame(animateParallax);
+}
+
+// Toggle handlers
+function handleAmbientLightingToggle() {
+    ambientLightingEnabled = document.getElementById('ambientLightingToggle').checked;
+    saveSettings();
+
+    if (ambientLightingEnabled) {
+        updateAmbientLighting();
+    } else {
+        // Reset to default
+        setAmbientColors({
+            a: 'var(--primary-color)',
+            b: 'var(--secondary-color)',
+            c: 'var(--accent-color)'
+        });
+    }
+}
+
+function handleMotionTrailsToggle() {
+    motionTrailsEnabled = document.getElementById('motionTrailsToggle').checked;
+    saveSettings();
+
+    if (motionTrailsEnabled) {
+        initMotionTrailsCanvas();
+    } else {
+        if (motionTrailsCanvas) {
+            motionTrailsCanvas.remove();
+            motionTrailsCanvas = null;
+            motionTrailsCtx = null;
+        }
+        motionTrailParticles = [];
+        if (trailsAnimationId) {
+            cancelAnimationFrame(trailsAnimationId);
+            trailsAnimationId = null;
+        }
+    }
+}
+
+function handleGlassDistortionToggle() {
+    glassDistortionEnabled = document.getElementById('glassDistortionToggle').checked;
+    saveSettings();
+
+    if (!glassDistortionEnabled) {
+        updateGlassDistortion(0);
+    }
+}
+
+function handleCustomCursorToggle() {
+    customCursorEnabled = document.getElementById('customCursorToggle').checked;
+    saveSettings();
+
+    if (customCursorEnabled && !isTouchDevice) {
+        initCustomCursor();
+        animateCursor();
+        document.body.style.cursor = 'none';
+    } else {
+        if (cursorOrb) {
+            cursorOrb.remove();
+            cursorOrb = null;
+        }
+        document.body.style.cursor = '';
+        if (cursorAnimationId) {
+            cancelAnimationFrame(cursorAnimationId);
+            cursorAnimationId = null;
+        }
+    }
+}
+
+function handleParallaxToggle() {
+    parallaxEnabled = document.getElementById('parallaxToggle').checked;
+    saveSettings();
+
+    if (parallaxEnabled) {
+        animateParallax();
+    } else {
+        // Reset transforms
+        document.documentElement.style.setProperty('--parallax-x', '0px');
+        document.documentElement.style.setProperty('--parallax-y', '0px');
+        document.documentElement.style.setProperty('--parallax-rotate-x', '0deg');
+        document.documentElement.style.setProperty('--parallax-rotate-y', '0deg');
+    }
+}
+
+// Global event handlers
+function handleMouseMove(event) {
+    if (customCursorEnabled && !isTouchDevice) {
+        updateCursorPosition(event.clientX, event.clientY);
+    }
+
+    if (parallaxEnabled) {
+        updateParallax(event.clientX, event.clientY);
+    }
+}
+
+function handleMouseEnter(event) {
+    if (motionTrailsEnabled && event.target.matches('#vibeBtn, #moodQuote')) {
+        spawnMotionTrail(event.clientX, event.clientY);
+    }
+
+    if (glassDistortionEnabled && event.target.matches('.card')) {
+        event.target.addEventListener('mousemove', handleGlassDistortionHover);
+    }
+
+    if (customCursorEnabled) {
+        handleCursorHover(event);
+    }
+}
+
+function handleMouseLeave(event) {
+    if (glassDistortionEnabled && event.target.matches('.card')) {
+        event.target.removeEventListener('mousemove', handleGlassDistortionHover);
+        updateGlassDistortion(0);
+    }
+
+    if (customCursorEnabled) {
+        handleCursorHover(event);
+    }
+}
+
+// API for other systems
+const visuals = {
+    setThemePalette: setAmbientColors,
+    pulseOrb: (intensity, duration) => {
+        if (!customCursorEnabled || !cursorOrb) return;
+        cursorOrb.style.transform = `scale(${1 + intensity * 0.5})`;
+        setTimeout(() => {
+            if (cursorOrb) cursorOrb.style.transform = '';
+        }, duration);
+    },
+    spawnHoverTrail: spawnMotionTrail
+};
+
 // Keyboard handling
 function handleKeydown(event) {
-    if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) {
-        document.getElementById('focusMode').checked = false;
-        toggleFocusMode();
+    if (event.key === 'Escape') {
+        // Close modals
+        if (document.getElementById('customQuotesModal').style.display === 'flex') {
+            closeCustomQuotesModal();
+        } else if (document.getElementById('themeBuilderModal').style.display === 'flex') {
+            closeThemeBuilderModal();
+        } else if (document.body.classList.contains('focus-mode')) {
+            document.getElementById('focusMode').checked = false;
+            toggleFocusMode();
+        }
     }
 }
 
@@ -662,6 +1524,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         initCanvas();
     }
 
+    // Initialize new features
+    document.getElementById('journalDate').value = currentJournalDate;
+    updateJournalDate();
+
+    // Update adaptive theme button
+    const adaptiveBtn = document.getElementById('adaptiveThemeToggle');
+    adaptiveBtn.textContent = `Adaptive ${adaptiveThemeMode.charAt(0).toUpperCase() + adaptiveThemeMode.slice(1)}`;
+    adaptiveBtn.setAttribute('aria-pressed', adaptiveThemeMode !== 'off');
+
     // Event listeners
     document.getElementById('vibeBtn').addEventListener('click', () => {
         generateVibe().catch(console.error);
@@ -682,5 +1553,81 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('savedGallery').style.display = 'none';
     });
     document.getElementById('audioOverlay').addEventListener('click', enableAudio);
+
+    // New feature event listeners
+    document.getElementById('customQuotesBtn').addEventListener('click', showCustomQuotesModal);
+    document.getElementById('closeQuotesModalBtn').addEventListener('click', closeCustomQuotesModal);
+    document.getElementById('addQuoteBtn').addEventListener('click', addUserQuote);
+    document.getElementById('importQuotesBtn').addEventListener('click', importQuotes);
+    document.getElementById('exportQuotesBtn').addEventListener('click', exportQuotes);
+
+    document.getElementById('themeBuilderBtn').addEventListener('click', showThemeBuilderModal);
+    document.getElementById('closeThemeBuilderBtn').addEventListener('click', closeThemeBuilderModal);
+    document.getElementById('saveCustomThemeBtn').addEventListener('click', saveCustomTheme);
+    document.getElementById('applyCustomThemeBtn').addEventListener('click', () => {
+        updateThemePreview();
+        applyCustomThemePreview();
+    });
+
+    // Theme builder live preview
+    ['bgColor1', 'bgColor2', 'accentColor', 'blurSlider', 'contrastSlider', 'fontSelect'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateThemePreview);
+    });
+
+    document.getElementById('adaptiveThemeToggle').addEventListener('click', toggleAdaptiveTheme);
+
+    // Visual enhancement toggles
+    document.getElementById('ambientLightingToggle').addEventListener('change', handleAmbientLightingToggle);
+    document.getElementById('motionTrailsToggle').addEventListener('change', handleMotionTrailsToggle);
+    document.getElementById('glassDistortionToggle').addEventListener('change', handleGlassDistortionToggle);
+    document.getElementById('customCursorToggle').addEventListener('change', handleCustomCursorToggle);
+    document.getElementById('parallaxToggle').addEventListener('change', handleParallaxToggle);
+
+    document.getElementById('journalDate').addEventListener('change', updateJournalDate);
+    document.getElementById('journalEntry').addEventListener('input', () => {
+        // Auto-save after 2 seconds of inactivity
+        clearTimeout(window.journalSaveTimeout);
+        window.journalSaveTimeout = setTimeout(saveJournalEntry, 2000);
+    });
+    document.getElementById('saveJournalBtn').addEventListener('click', saveJournalEntry);
+    document.getElementById('prevDayBtn').addEventListener('click', () => navigateJournal(-1));
+    document.getElementById('nextDayBtn').addEventListener('click', () => navigateJournal(1));
+    document.getElementById('exportJournalBtn').addEventListener('click', exportJournal);
+
     document.addEventListener('keydown', handleKeydown);
+
+    // Global visual enhancement event listeners
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseenter', handleMouseEnter, true);
+    document.addEventListener('mouseleave', handleMouseLeave, true);
+
+    // Initialize visual enhancements based on settings
+    if (ambientLightingEnabled) {
+        updateAmbientLighting();
+        setInterval(updateAmbientLighting, 100); // Update every 100ms for smooth animation
+    }
+
+    if (motionTrailsEnabled) {
+        initMotionTrailsCanvas();
+    }
+
+    if (customCursorEnabled && !isTouchDevice) {
+        initCustomCursor();
+        animateCursor();
+        document.body.style.cursor = 'none';
+    }
+
+    if (parallaxEnabled) {
+        animateParallax();
+    }
+
+    // Set initial checkbox states
+    document.getElementById('ambientLightingToggle').checked = ambientLightingEnabled;
+    document.getElementById('motionTrailsToggle').checked = motionTrailsEnabled;
+    document.getElementById('glassDistortionToggle').checked = glassDistortionEnabled;
+    document.getElementById('customCursorToggle').checked = customCursorEnabled;
+    document.getElementById('parallaxToggle').checked = parallaxEnabled;
+
+    // Expose visuals API globally for other systems
+    window.visuals = visuals;
 });
