@@ -1,12 +1,14 @@
 {
-  "name": "my-react-app",
+  "name": "mood-board",
   "version": "0.1.0",
   "type": "module",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "vite": "^4.0.0"
+    "react-router-dom": "^6.30.1",
+    "vite": "^4.0.0",
+    "zustand": "^4.5.7"
   },
   "scripts": {
     "dev": "vite",
